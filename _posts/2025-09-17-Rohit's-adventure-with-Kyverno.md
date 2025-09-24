@@ -10,7 +10,7 @@ Kyverno consists of several controllers that operate between the API server and 
 
 <br>
 
-![Kyverno Architectural diagram](image.png)
+![Kyverno Architectural diagram](./image.png)
 <br>
 
 ### Kyverno Controller Roles
@@ -81,7 +81,7 @@ spec:
 This cluster policy operates across all pods and ensures they do not reference `secretKeyRef` in their spec. The syntax `=()` in the policy checks for the presence of the `env` key before inspecting `valueFrom`, which prevents errors if previous fields are missing. Policies often contain multiple rules of similar intent, as in this case where two rules check for secret keys within pods.
 
 2. **Signature validation for container images**
-```yaml
+```
 apiVersion: kyverno.io/v1
 kind: ClusterPolicy
 metadata:
