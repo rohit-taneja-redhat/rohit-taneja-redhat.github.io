@@ -1,25 +1,34 @@
-## Rohit's adventure with Kyverno
-
+## Rohit's Adventure with Kyverno
 
 #### Overview
 
-On one of my client sites, I was asked to work on an OpenShift cluster compliance and security. Openshift by default provides various security and compliance features by default, it has role based access control to allow role separation between cluster-admins vs devs etc, it also has admission controllers to make sure incoming resources adhere to the syntax and the CRD rules as well as restrictions to run privileged loads on the platform. However, there are more advance use cases that OpenShift does not take into account. This is where kyverno comes in - it allows for putting up cluster guardrails so developer teams can stay within bounds of what they're supposed to do and allow enforcing best practices.
+Recently, at one of my client sites, I was tasked with enhancing the OpenShift cluster for compliance and security. OpenShift provides a variety of built-in security and compliance features, including role-based access control for distinguishing between cluster-admins and developers, as well as admission controllers that enforce resource syntax, adhere to Custom Resource Definition (CRD) rules, and restrict privileged workloads on the platform. However, there are advanced use cases that OpenShift's built-in capabilities do not address. This is where Kyverno becomes invaluable—it allows creation of cluster guardrails so developer teams remain within the boundaries of best practices and expected standards.
 
 #### Architecture
 
-Kyverno is basically made up of different controllers that sit between the api server and the etcd database. It can allow for rules that can stop resources with certain labels to come in or allow for resources to be admitted only if they carry a certain annotations, this is achieved using the admission controller. Kyverno consists of Background controller, cleanup controller, and reports controller. If you want to make changes to already existing resources, the background controller comes in handy to mutate and delete resource as well. The reports policy is used to generate reports of it's findings and violation of certain rules.
+Kyverno consists of several controllers that operate between the API server and the etcd database. It can enforce rules to prevent resources with certain labels from being admitted or require resources to carry specific annotations using its admission controller. Kyverno includes the Background Controller, Cleanup Controller, and Reports Controller. The Background Controller is especially useful for mutating and deleting existing resources, while the Reports Controller generates findings and rule violation reports.
 
-<Insert Kyverno architecture diagram here>  
+<br>
 
-#### Use cases
+![Kyverno Architectural diagram](image.png)
+<br>
 
-Before I talk about the specific rules I want to introduce the concept of Policies and ClusterPolicies in Kyverno. You can either allow for the rules to apply to all the namespace via ClusterPolicy and any rules that apply only to certain namespaces can be applied through Policy Resource. There are two types of action these policies can do, either audit all the violations and observances of these rules or Block certain resources based on the rules.
+### Kyverno Controller Roles
 
-Some of the policies I created to implement guardrails and best practices were:
+| Controller | Primary Function | Applies To |
+| :-- | :-- | :-- |
+| Admission Controller | Resource admission | New resource requests |
+| Background Controller | Mutations \& deletions | Existing resources |
+| Reports Controller | Policy violations | Reporting \& compliance |
 
-1. Audit if deployments are setting secrets as environment variables.
+#### Use Cases
 
-```
+Before diving into specific rules, it’s important to understand the concept of Policies and ClusterPolicies in Kyverno. A ClusterPolicy applies rules across all namespaces, whereas a Policy resource restricts rules to select namespaces. Policies can either audit all rule violations (observing but not blocking) or block resources that violate specific rules.
+
+Some of the policies I created to enforce guardrails and best practices:
+
+1. **Audit if deployments use secrets as environment variables**
+```yaml
 apiVersion: kyverno.io/v1
 kind: ClusterPolicy
 metadata:
@@ -32,7 +41,7 @@ metadata:
     kyverno.io/kyverno-version: 1.6.0
     policies.kyverno.io/description: >-
       Secrets used as environment variables containing sensitive information may, if not carefully controlled, 
-      be printed in log output which could be visible to unauthorized people and captured in forwarding
+      be printed in log output which could be visible to unauthorized individuals and captured by forwarding
       applications. This policy disallows using Secrets as environment variables.
 spec:
   validationFailureAction: Audit
@@ -69,12 +78,10 @@ spec:
             - X(secretRef): "null"
 ```
 
-This cluster policy works on all the Pods and make sure they do not have `secretKeyRef` in the spec. The syntax `=()` in the above policy checks if the key env is present and only moves forward to the key `valueFrom`. This basically ensures the policy won't error out if the previous field is not present. Also a policy can have multiple rules of usually of similar requirements, in our case above we have two rules that check for secret keys inside of pods. 
+This cluster policy operates across all pods and ensures they do not reference `secretKeyRef` in their spec. The syntax `=()` in the policy checks for the presence of the `env` key before inspecting `valueFrom`, which prevents errors if previous fields are missing. Policies often contain multiple rules of similar intent, as in this case where two rules check for secret keys within pods.
 
-2. Signature validation for container images.
-
-
-```
+2. **Signature validation for container images**
+```yaml
 apiVersion: kyverno.io/v1
 kind: ClusterPolicy
 metadata:
@@ -87,11 +94,11 @@ metadata:
     policies.kyverno.io/minversion: 1.7.0
     policies.kyverno.io/description: >-
       Using the Cosign project, OCI images may be signed to ensure supply chain
-      security is maintained. Those signatures can be verified before pulling into
+      security is maintained. Signatures can be verified before pulling into
       a cluster. This policy checks the signature of an image repo called
-      ghcr.io/kyverno/test-verify-image to ensure it has been signed by verifying
-      its signature against the provided public key. This policy serves as an illustration for
-      how to configure a similar rule and will require replacing with your image(s) and keys.      
+      ghcr.io/kyverno/test-verify-image to ensure it has been signed, verifying
+      against the provided public key. This example must be modified for your own images
+      and keys.
 spec:
   validationFailureAction: enforce
   background: false
@@ -113,36 +120,32 @@ spec:
                 -----BEGIN PUBLIC KEY-----
                 MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE8nXRh950IZbRj8Ra/N9sbqOPZrfM
                 5/KAQN0/KjHcorm/J5yctVd7iEcnessRQjU917hmKO6JWVGHpDguIyakZA==
-                -----END PUBLIC KEY-----                
-
-``` 
-
-You can also use kyverno to verify the image present in your platform are signed or not. The above policy checks on all the pods with imageReferences from `ghcr.io/kyverno/test-verify-image:*` which means all the test-verify-image with any tag needs to be verified against this public key. You can change the imageReference to check for all the images from ghcr.io, quay.io etc with the following syntax:
-
+                -----END PUBLIC KEY-----
 ```
+
+Kyverno also supports image signature verification to ensure supply chain security. This policy matches all pods using images from `ghcr.io/kyverno/test-verify-image:*` and verifies their signatures against a provided public key. You can change image references to match all images from registries such as `ghcr.io` or `quay.io` using wildcard syntax:
+
+```yaml
 - imageReferences:
   - "ghcr.io/*"
   - "quay.io/*"
 ```
 
-You can also check for predicates, annotations in the image metadata, attestations, and signatures for more granular checks. Along with key-pair checks, there are other ways to verify signature with cosign including keyless and certificate verification.
+Predicate, annotation checks, and attestation policies can provide additional granularity. Along with key-pair-based verification, cosign supports keyless and certificate-based validations.
 
-PS: these policies are from the offical kyverno documentation, Check it out for more uses cases: [Kyverno Policies](https://release-1-8-0.kyverno.io/policies/other/verify_image/)
+PS: These policies are from the official Kyverno documentation. Check it out for more use cases: [Kyverno Policies](https://release-1-8-0.kyverno.io/policies/other/verify_image/)
 
+#### Good to Know
 
-#### Good to know
+- Kyverno can be configured to ignore certain namespaces using a ConfigMap called `kyverno`. You can specify namespaces to ignore by labels and wildcards, using `resourceFilter` and `webhook` keys.
 
-1. You can avoid certain namespaces to be managed by kyverno using a configMap called kyverno. You can specify the namespaces you want kyverno to ignore using labels and wilcards for the names. You can use `resourceFilter` and `webhook` keys to achieve it.
-
+```yaml
+resourceFilters: '[*/*,test,*], [*/*, openshift-*,*]'
+webhook: webhooks: '[{\"namespaceSelector\":{\"matchExpressions\":[{\"key\":\"kubernetes.io/metadata.name\",\"operator\":\"NotIn\",\"values\":[\"kube-system\"]},{\"key\":\"kubernetes.io/metadata.name\",\"operator\":\"NotIn\",\"values\":[\"kyverno\"]}],\"matchLabels\":null}}]'
 ```
-  resourceFilters: '[*/*,test,*]', [*/*, openshift-*,*]
-  webhook:   webhooks: '[{\"namespaceSelector\":{\"matchExpressions\":[{\"key\":\"kubernetes.io/metadata.name\",\"operator\":\"NotIn\",\"values\":[\"kube-system\"]},{\"key\":\"kubernetes.io/metadata.name\",\"operator\":\"NotIn\",\"values\":[\"kyverno\"]}],\"matchLabels\":null}}]'
-```
 
-The resource filter will not apply any ClusterPolicy and Policy in test as well as any namespace starting with openshift- - like openshift-apiserver, openshift-etcd etc.
-Whereas webhook uses namespace selector with the help of labels to avoid the namespaces.
+The resource filter prevents ClusterPolicy and Policy application in `test` or any namespace prefixed with `openshift-`, such as `openshift-apiserver` or `openshift-etcd`. Webhooks use namespace selectors and labels to exclude specific namespaces from processing.
 
-FYI - Webhooks are an instruction to the API server for what NOT to send to Kyverno. The resource filter (in the ConfigMap) is an instruction to Kyverno on what NOT to process (i.e., ignore).
+> Webhooks instruct the API server about what NOT to send to Kyverno, whereas the resource filter in the ConfigMap tells Kyverno what NOT to process (i.e., ignore).
 
-Any Background requests are not affected by resourceFilters and webhooks since they are applied only to admission review, so if you wanna mutate existing resources you can use match/exclude keys on the policies.
-
+> Background requests are not affected by resourceFilters and webhooks, since they apply only to admission reviews. To mutate existing resources, use match/exclude keys within policy definitions.
