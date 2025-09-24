@@ -28,7 +28,7 @@ Before diving into specific rules, it’s important to understand the concept of
 Some of the policies I created to enforce guardrails and best practices:
 
 1. **Audit if deployments use secrets as environment variables**
-```yaml
+```
 apiVersion: kyverno.io/v1
 kind: ClusterPolicy
 metadata:
